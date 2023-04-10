@@ -34,7 +34,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
   val nextStartAddr   = UInt(VAddrBits.W)
   //slow path
   val ftqIdx          = new FtqPtr
-  val ftqOffset       = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))
+  val ftqOffset       = ValidUndirectioned(UInt(log2Ceil(PredictWidth).W))  // 应该是接下来要运行指令结束点的偏移
 
   def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
 
@@ -63,7 +63,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
 class FtqICacheInfo(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val startAddr           = UInt(VAddrBits.W)
   val nextlineStart       = UInt(VAddrBits.W)
-  def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
+  def crossCacheline =  startAddr(blockOffBits - 1) === 1.U   // 跨cacheline
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr := b.startAddr
     this.nextlineStart := b.nextLineAddr
@@ -76,6 +76,7 @@ class IFUICacheIO(implicit p: Parameters)extends XSBundle with HasICacheParamete
   val resp              = Vec(PortNumber, ValidIO(new ICacheMainPipeResp))
 }
 
+// 为什么copy5份
 class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val pcMemRead           = Vec(5, new FtqICacheInfo)
   val readValid           = Vec(5, Bool())
@@ -195,6 +196,7 @@ class CircularGlobalHistory(implicit p: Parameters) extends GlobalHistory {
   }
 }
 
+// 管理全局分支历史
 class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(implicit p: Parameters)
   extends XSBundle with HasBPUConst {
   require(compLen >= 1)
@@ -421,7 +423,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   val is_br_sharing = Bool()
 
   // val call_is_rvc = Bool()
-  val hit = Bool()
+  val hit = Bool()      // 命中某FTB项
 
   def br_slot_valids = slot_valids.init
   def tail_slot_valid = slot_valids.last
@@ -487,6 +489,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   def hit_taken_on_ret  = hit_taken_on_jmp && is_ret
   def hit_taken_on_jalr = hit_taken_on_jmp && is_jalr
 
+  // 分支指令taken的偏移
   def cfiIndex = {
     val cfiIndex = Wire(ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
     cfiIndex.valid := real_slot_taken_mask().asUInt.orR

@@ -53,7 +53,7 @@ trait TageParams extends HasBPUConst with HasXSParameter {
   def posUnconf(ctr: UInt) = ctr === (1 << (ctr.getWidth - 1)).U
   def negUnconf(ctr: UInt) = ctr === ((1 << (ctr.getWidth - 1)) - 1).U
 
-  def unconf(ctr: UInt) = posUnconf(ctr) || negUnconf(ctr)
+  def unconf(ctr: UInt) = posUnconf(ctr) || negUnconf(ctr) // 0b100，0b011
 
   val unshuffleBitWidth = log2Ceil(numBr)
   def get_unshuffle_bits(idx: UInt) = idx(unshuffleBitWidth-1, 0)
@@ -88,7 +88,7 @@ abstract class TageModule(implicit p: Parameters)
 
 
 class TageReq(implicit p: Parameters) extends TageBundle {
-  val pc = UInt(VAddrBits.W)
+  val pc = UInt(VAddrBits.W)    // 预测块起始地址
   val ghist = UInt(HistoryLength.W)
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
 }
@@ -117,15 +117,15 @@ class TageUpdate(implicit p: Parameters) extends TageBundle {
 class TageMeta(implicit p: Parameters)
   extends TageBundle with HasSCParameter
 {
-  val providers = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
-  val providerResps = Vec(numBr, new TageResp)
+  val providers = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))   // 是否有provider，有的话是谁
+  val providerResps = Vec(numBr, new TageResp)                                    // provider提供的预测结果
   // val altProviders = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
   // val altProviderResps = Vec(numBr, new TageResp)
-  val altUsed = Vec(numBr, Bool())
-  val altDiffers = Vec(numBr, Bool())
-  val basecnts = Vec(numBr, UInt(2.W))
+  val altUsed = Vec(numBr, Bool())                // 是否用到了alt的结果
+  val altDiffers = Vec(numBr, Bool())             // alt结果与最终结果不同
+  val basecnts = Vec(numBr, UInt(2.W))            // 基预测器计数器
   val allocates = Vec(numBr, UInt(TageNTables.W))
-  val takens = Vec(numBr, Bool())
+  val takens = Vec(numBr, Bool())                 // 最终结果
   val scMeta = if (EnableSC) Some(new SCMeta(SCNTables)) else None
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
   val use_alt_on_na = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
@@ -139,6 +139,10 @@ trait TBTParams extends HasXSParameter with TageParams {
   val bypassEntries = 8
 }
 
+/**
+  * Base Table，基础预测器表，2048sets
+  * 功能：根据pc返回饱和计数器；根据update更新
+  */
 @chiselName
 class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   val io = IO(new Bundle {
@@ -154,14 +158,14 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
-  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = true, holdRead = true, bypassWrite = true))
+  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = true, holdRead = true, bypassWrite = true)) // shouldReset表示初始化为0
 
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
   resetRow := resetRow + doing_reset
   when (resetRow === (BtSize-1).U) { doing_reset := false.B }
 
-  val s0_idx = bimAddr.getIdx(io.s0_pc)
+  val s0_idx = bimAddr.getIdx(io.s0_pc) // 10.W
   bt.io.r.req.valid := io.s0_fire
   bt.io.r.req.bits.setIdx := s0_idx
 
@@ -225,7 +229,10 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
 }
 
-
+/**
+  * 功能：根据pc和历史返回TageResp信息；根据TageUpdate更新
+  * 延迟一周期返回
+  */
 @chiselName
 class TageTable
 (
@@ -248,12 +255,12 @@ class TageTable
   val SRAM_SIZE = 256 // physical size
   require(nRows % SRAM_SIZE == 0)
   require(isPow2(numBr))
-  val nRowsPerBr = nRows / numBr
+  val nRowsPerBr = nRows / numBr            // 2048 = 4096/2
   val nBanks = 8
-  val bankSize = nRowsPerBr / nBanks
-  val bankFoldWidth = if (bankSize >= SRAM_SIZE) bankSize / SRAM_SIZE else 1
-  val uFoldedWidth = nRowsPerBr / SRAM_SIZE
-  val uWays = uFoldedWidth * numBr
+  val bankSize = nRowsPerBr / nBanks        // 256 = 2048/8
+  val bankFoldWidth = if (bankSize >= SRAM_SIZE) bankSize / SRAM_SIZE else 1  // 1
+  val uFoldedWidth = nRowsPerBr / SRAM_SIZE // 8
+  val uWays = uFoldedWidth * numBr          // 16
   val uRows = SRAM_SIZE
   if (bankSize < SRAM_SIZE) {
     println(f"warning: tage table $tableIdx has small sram depth of $bankSize")
@@ -302,11 +309,11 @@ class TageTable
 
   // val s1_pc = io.req.bits.pc
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
-
+  // usefulness，每条指令有2048*8
   val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true))
   us.extra_reset.get := io.update.reset_u.reduce(_||_)
 
-
+  // 每条指令有 8*256*1
   val table_banks = Seq.fill(nBanks)(
     Module(new FoldedSRAMTemplate(new TageEntry, set=bankSize, width=bankFoldWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true)))
 
@@ -530,6 +537,11 @@ class FakeTage(implicit p: Parameters) extends BaseTage {
   io.s2_ready := true.B
 }
 
+/**
+  * 功能：根据s0_pc和历史给出s2，s3阶段是否跳转(br_taken_mask)
+  *
+  * ？resp_in_0_s1好像只走了过场，未找到minimal_pred
+  */
 @chiselName
 class Tage(implicit p: Parameters) extends BaseTage {
 
@@ -549,8 +561,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
   bt.io.s0_fire := io.s0_fire(1)
   bt.io.s0_pc   := s0_pc_dup(1)
 
-  val bankTickCtrDistanceToTops = Seq.fill(numBr)(RegInit((1 << (TickWidth-1)).U(TickWidth.W)))
+  // 用来统计表项分配失败的次数
+  val bankTickCtrDistanceToTops = Seq.fill(numBr)(RegInit((1 << (TickWidth-1)).U(TickWidth.W))) // 12.U(7.W)
   val bankTickCtrs = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
+  // 2x128  初始化为0b110.U(4.W)
   val useAltOnNaCtrs = RegInit(
     VecInit(Seq.fill(numBr)(
       VecInit(Seq.fill(NUM_USE_ALT_ON_NA)((1 << (USE_ALT_ON_NA_WIDTH-1)).U(USE_ALT_ON_NA_WIDTH.W)))
@@ -635,14 +649,14 @@ class Tage(implicit p: Parameters) extends BaseTage {
   // access tag tables and output meta info
 
   for (i <- 0 until numBr) {
-    val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc_dup(1)), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i))
+    val useAltCtr = Mux1H(UIntToOH(use_alt_idx(s1_pc_dup(1)), NUM_USE_ALT_ON_NA), useAltOnNaCtrs(i)) // 用pc值索引
     val useAltOnNa = useAltCtr(USE_ALT_ON_NA_WIDTH-1) // highest bit
 
     val s1_per_br_resp = VecInit(s1_resps.map(_(i)))
     val inputRes = s1_per_br_resp.zipWithIndex.map{case (r, idx) => {
       val tableInfo = Wire(new TageTableInfo)
       tableInfo.resp := r.bits
-      tableInfo.use_alt_on_unconf := r.bits.unconf && useAltOnNa
+      tableInfo.use_alt_on_unconf := r.bits.unconf && useAltOnNa      // 不自信并且useAltOnNa拉高
       tableInfo.tableIdx := idx.U(log2Ceil(TageNTables).W)
       (r.valid, tableInfo)
     }}
@@ -681,7 +695,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
     val s1_bimCtr = bt.io.s1_cnt(i)
     s1_tageTakens(i) := 
-      Mux(!provided || providerInfo.use_alt_on_unconf,
+      Mux(!provided || providerInfo.use_alt_on_unconf,      // 如果没有provider，或者use_alt
         s1_bimCtr(1),
         providerInfo.resp.ctr(TageCtrBits-1)
       )
@@ -729,6 +743,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val updateProviderWeaknotTaken = negUnconf(updateProviderResp.ctr)
     val updateProviderWeak = unconf(updateProviderResp.ctr)
 
+    // 更新usealtOnNa计数器
     when (hasUpdate) {
       when (updateProvided && updateProviderWeak && updateAltDiffers) {
         val newCtr = satUpdate(updateUseAltCtr, USE_ALT_ON_NA_WIDTH, updateAltCorrect)
@@ -750,6 +765,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
     updateMeta.use_alt_on_na.map(uaon => XSPerfAccumulate(f"tage_bank_${i}_use_alt_on_na", hasUpdate && uaon(i)))
 
+    // 将更新信息传给provider表
     when (hasUpdate) {
       when (updateProvided) {
         updateMask(i)(updateProvider) := true.B
@@ -766,12 +782,12 @@ class Tage(implicit p: Parameters) extends BaseTage {
     updatebcnt(i) := updateMeta.basecnts(i)
     bUpdateTakens(i) := updateTaken
 
-    val needToAllocate = hasUpdate && updateMispred && !(updateUseAlt && updateProviderCorrect && updateProvided)
+    val needToAllocate = hasUpdate && updateMispred && !(updateUseAlt && updateProviderCorrect && updateProvided) // 需要添加表项
     val allocatableMask = updateMeta.allocates(i)
     val canAllocate = updateMeta.allocateValid(i)
 
     val allocLFSR = LFSR64()(TageNTables - 1, 0)
-    val longerHistoryTableMask = ~(LowerMask(UIntToOH(updateProvider), TageNTables) & Fill(TageNTables, updateProvided.asUInt))
+    val longerHistoryTableMask = ~(LowerMask(UIntToOH(updateProvider), TageNTables) & Fill(TageNTables, updateProvided.asUInt)) // 寻找有更长历史表的table
     val canAllocMask = allocatableMask & longerHistoryTableMask
     val allocFailureMask = ~allocatableMask & longerHistoryTableMask
     val tickInc = PopCount(allocFailureMask) > PopCount(canAllocMask)
@@ -783,7 +799,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
     val firstEntry = PriorityEncoder(canAllocMask)
     val maskedEntry = PriorityEncoder(canAllocMask & allocLFSR)
-    val allocate = Mux(canAllocMask(maskedEntry), maskedEntry, firstEntry)
+    val allocate = Mux(canAllocMask(maskedEntry), maskedEntry, firstEntry)    // 确定alloc位置
 
 
     when (needToAllocate) {

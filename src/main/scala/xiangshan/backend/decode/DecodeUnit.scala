@@ -575,7 +575,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val ctrl_flow = Wire(new CtrlFlow) // input with RVC Expanded
   val cf_ctrl = Wire(new CfCtrl)
 
-  ctrl_flow := io.enq.ctrl_flow
+  ctrl_flow := io.enq.ctrl_flow  // input
 
   val decode_table = XDecode.table ++
     FDecode.table ++
@@ -592,7 +592,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   // output
   cf_ctrl.cf := ctrl_flow
-  val cs: CtrlSignals = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
+  val cs: CtrlSignals = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)   // 译码
   cs.singleStep := false.B
   cs.replayInst := false.B
 

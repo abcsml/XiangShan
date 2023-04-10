@@ -114,6 +114,10 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     val jalOffset = jal_offset(inst, currentIsRVC)
     val brOffset  = br_offset(inst, currentIsRVC)
 
+    // 0 12 3
+    // 01  12  23  34, right
+    // 11  10  01  11, valid
+    // 01  10  01  11, h_valid
     //val lastIsValidEnd =  if (i == 0) { !lastHalfMatch } else { validEnd(i-1) || !HasCExtension.B }
     val lastIsValidEnd =   if (i == 0) { true.B } else { validEnd(i-1) || !HasCExtension.B }
     validStart(i)   := (lastIsValidEnd || !HasCExtension.B)
@@ -125,7 +129,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     h_validStart(i)   := (h_lastIsValidEnd || !HasCExtension.B)
     h_validEnd(i)     := h_validStart(i) && currentIsRVC || !h_validStart(i) || !HasCExtension.B
 
-    io.out.hasHalfValid(i)        := h_validStart(i)
+    io.out.hasHalfValid(i)        := h_validStart(i) // ?????
 
     io.out.triggered(i)   := DontCare//VecInit(Seq.fill(10)(false.B))
 
@@ -229,6 +233,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
 
   //Stage 1: detect remask fault
   /** first check: remask Fault */
+  // jal，ret不跳转错误
   jalFaultVec         := VecInit(pds.zipWithIndex.map{case(pd, i) => pd.isJal && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken) })
   retFaultVec         := VecInit(pds.zipWithIndex.map{case(pd, i) => pd.isRet && instrRange(i) && instrValid(i) && (takenIdx > i.U && predTaken || !predTaken) })
   val remaskFault      = VecInit((0 until PredictWidth).map(i => jalFaultVec(i) || retFaultVec(i)))
@@ -241,6 +246,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   io.out.stage1Out.fixedTaken := VecInit(pds.zipWithIndex.map{case(pd, i) => instrValid (i) && fixedRange(i) && (pd.isRet || pd.isJal || takenIdx === i.U && predTaken && !pd.notCFI)  })
 
   /** second check: faulse prediction fault and target fault */
+  // 非跳转指令预测错误
   notCFITaken  := VecInit(pds.zipWithIndex.map{case(pd, i) => fixedRange(i) && instrValid(i) && i.U === takenIdx && pd.notCFI && predTaken })
   invalidTaken := VecInit(pds.zipWithIndex.map{case(pd, i) => fixedRange(i) && !instrValid(i)  && i.U === takenIdx  && predTaken })
 

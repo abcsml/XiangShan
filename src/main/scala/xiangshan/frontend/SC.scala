@@ -63,6 +63,10 @@ class SCTableIO(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val update = Input(new SCUpdate(ctrBits))
 }
 
+/**
+  * 输入pc，历史
+  * 返回ctr，每条br两个6bits ctr
+  */
 @chiselName
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Parameters)
   extends SCModule with HasFoldedHistory {
@@ -227,13 +231,14 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     }
     sc_fh_info = scTables.map(_.getFoldedHistoryInfo).reduce(_++_).toSet
 
-    val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))
+    val scThresholds = List.fill(TageBanks)(RegInit(SCThreshold(5)))  // 2x 5bits ctr
     val useThresholds = VecInit(scThresholds map (_.thres))
 
     def sign(x: SInt) = x(x.getWidth-1)
     def pos(x: SInt) = !sign(x)
     def neg(x: SInt) = sign(x)
 
+    /* 判断是否超出阈值 */
     def aboveThreshold(scSum: SInt, tagePvdr: SInt, threshold: UInt): Bool = {
       val signedThres = threshold.zext
       val totalSum = scSum +& tagePvdr

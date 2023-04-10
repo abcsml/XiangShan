@@ -79,7 +79,7 @@ class LastHalfInfo(implicit p: Parameters) extends XSBundle {
 }
 
 class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
-  val data                =  if(HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))
+  val data                =  if(HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W)) // 多加一个是为了照顾到half rv
   val frontendTrigger     = new FrontendTdataDistributeIO
   val pc                  = Vec(PredictWidth, UInt(VAddrBits.W))
 }
@@ -204,7 +204,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     * - generate exceprion bits for every instruciton (page fault/access fault/mmio)
     * - generate predicted instruction range (1 means this instruciton is in this fetch packet)
     * - cut data from cachlines to packet instruction code
-    * - instruction predecode and RVC expand
+    * - instruction predecode
     ******************************************************************************
     */
 
@@ -290,7 +290,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   val f2_data_2_cacheline =  Wire(Vec(4, UInt((2 * blockBits).W)))
-  f2_data_2_cacheline(0) := Cat(f2_cache_response_reg_data(1) , f2_cache_response_reg_data(0))
+  f2_data_2_cacheline(0) := Cat(f2_cache_response_reg_data(1) , f2_cache_response_reg_data(0))    // ???
   f2_data_2_cacheline(1) := Cat(f2_cache_response_reg_data(1) , f2_cache_response_sram_data(0))
   f2_data_2_cacheline(2) := Cat(f2_cache_response_sram_data(1) , f2_cache_response_reg_data(0))
   f2_data_2_cacheline(3) := Cat(f2_cache_response_sram_data(1) , f2_cache_response_sram_data(0))
@@ -455,7 +455,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
           mmio_state :=  Mux(needResend, m_sendTLB , m_waitCommit)
 
           mmio_is_RVC := isRVC
-          f3_mmio_data(0)   :=  fromUncache.bits.data(15,0)
+          f3_mmio_data(0)   :=  fromUncache.bits.data(15,0)   // 得到指令
           f3_mmio_data(1)   :=  fromUncache.bits.data(31,16)
       }
     }
@@ -591,7 +591,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.valid            := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
   io.toIbuffer.bits.instrs      := f3_expd_instr
   io.toIbuffer.bits.valid       := f3_instr_valid.asUInt
-  io.toIbuffer.bits.enqEnable   := checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt
+  io.toIbuffer.bits.enqEnable   := checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt       // 当前位是否有效标记，根据出错和分支跳转情况判断
   io.toIbuffer.bits.pd          := f3_pd
   io.toIbuffer.bits.ftqPtr      := f3_ftq_req.ftqIdx
   io.toIbuffer.bits.pc          := f3_pc
@@ -626,7 +626,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   mmioFlushWb.bits.ftqOffset  := f3_ftq_req.ftqOffset.bits
   mmioFlushWb.bits.misOffset  := f3_mmio_missOffset
   mmioFlushWb.bits.cfiOffset  := DontCare
-  mmioFlushWb.bits.target     := Mux(mmio_is_RVC, f3_ftq_req.startAddr + 2.U , f3_ftq_req.startAddr + 4.U)
+  mmioFlushWb.bits.target     := Mux(mmio_is_RVC, f3_ftq_req.startAddr + 2.U , f3_ftq_req.startAddr + 4.U)    // mmio重定向，下一条指令
   mmioFlushWb.bits.jalTarget  := DontCare
   mmioFlushWb.bits.instrRange := f3_mmio_range
 
@@ -728,7 +728,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkFlushWb.bits.misOffset.bits    := Mux(wb_half_flush, wb_lastIdx, ParallelPriorityEncoder(wb_check_result_stage2.fixedMissPred))
   checkFlushWb.bits.cfiOffset.valid   := ParallelOR(wb_check_result_stage1.fixedTaken)
   checkFlushWb.bits.cfiOffset.bits    := ParallelPriorityEncoder(wb_check_result_stage1.fixedTaken)
-  checkFlushWb.bits.target            := Mux(wb_half_flush, wb_half_target, wb_check_result_stage2.fixedTarget(ParallelPriorityEncoder(wb_check_result_stage2.fixedMissPred)))
+  checkFlushWb.bits.target            := Mux(wb_half_flush, wb_half_target, wb_check_result_stage2.fixedTarget(ParallelPriorityEncoder(wb_check_result_stage2.fixedMissPred))) // 应该是taken出错和跳转目标出错
   checkFlushWb.bits.jalTarget         := wb_check_result_stage2.fixedTarget(ParallelPriorityEncoder(VecInit(wb_pd.zip(wb_instr_valid).map{case (pd, v) => v && pd.isJal })))
   checkFlushWb.bits.instrRange        := wb_instr_range.asTypeOf(Vec(PredictWidth, Bool()))
 

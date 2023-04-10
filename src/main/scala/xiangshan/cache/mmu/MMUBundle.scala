@@ -86,9 +86,11 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     p"pm:${pm}"
   }
 }
-
-// multi-read && single-write
-// input is data, output is hot-code(not one-hot)
+/*
+ * multi-read && single-write
+ * input is data, output is hot-code(not one-hot)
+ * 内容寻址寄存器
+ */
 class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int)(implicit p: Parameters) extends TlbModule {
   val io = IO(new Bundle {
     val r = new Bundle {

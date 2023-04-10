@@ -242,7 +242,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s3_pc = RegEnable(s2_pc, s2_fire_dup(0))
 
   val s0_folded_gh_dup = dup_wire(new AllFoldedHistories(foldedGHistInfos))
-  val s0_folded_gh_reg_dup = s0_folded_gh_dup.map(x => RegNext(x, init=0.U.asTypeOf(s0_folded_gh_dup(0))))
+  val s0_folded_gh_reg_dup = s0_folded_gh_dup.map(x => RegNext(x, init=0.U.asTypeOf(s0_folded_gh_dup(0))))  // 初始化折叠历史
   val s1_folded_gh_dup = RegEnable(s0_folded_gh_dup, 0.U.asTypeOf(s0_folded_gh_dup), s0_fire_dup(1))
   val s2_folded_gh_dup = RegEnable(s1_folded_gh_dup, 0.U.asTypeOf(s0_folded_gh_dup), s1_fire_dup(1))
   val s3_folded_gh_dup = RegEnable(s2_folded_gh_dup, 0.U.asTypeOf(s0_folded_gh_dup), s2_fire_dup(1))
@@ -268,6 +268,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val ghvBitWriteGens = Seq.tabulate(HistoryLength)(n => new PhyPriorityMuxGenerator[Bool])
   // val ghistGen = new PhyPriorityMuxGenerator[UInt]
 
+  // 全局历史本体
   val ghv = RegInit(0.U.asTypeOf(Vec(HistoryLength, Bool())))
   val ghv_wire = WireInit(ghv)
 

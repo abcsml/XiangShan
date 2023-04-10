@@ -31,6 +31,11 @@ class RASEntry()(implicit p: Parameters) extends XSBundle {
     val ctr = UInt(8.W) // layer of nested call functions
 }
 
+/**
+  * 更新s2,s3 full_pred的jalr_target，targets.last信息
+  * 
+  * ？：last_stage_spec_info
+  */
 @chiselName
 class RAS(implicit p: Parameters) extends BasePredictor {
   object RASEntry {
@@ -42,6 +47,9 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     }
   }
 
+  /**
+    * 用mem实现的RAS栈
+    */
   @chiselName
   class RASStack(val rasSize: Int) extends XSModule {
     val io = IO(new Bundle {

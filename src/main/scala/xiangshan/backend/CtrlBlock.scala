@@ -244,8 +244,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
 
   val decode = Module(new DecodeStage)
-  val fusionDecoder = Module(new FusionDecoder)
-  val rat = Module(new RenameTableWrapper)
+  val fusionDecoder = Module(new FusionDecoder)   // 指令融合(多条合并为一条)译码
+  val rat = Module(new RenameTableWrapper)        // 重命名表
   val ssit = Module(new SSIT)
   val waittable = Module(new WaitTable)
   val rename = Module(new Rename)

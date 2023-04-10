@@ -50,7 +50,7 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
   def res: UInt = Cat(c, atomic) // in pmp, unused
   def off = a === 0.U
   def tor = a === 1.U
-  def na4 = { if (CoarserGrain) false.B else a === 2.U }
+  def na4 = { if (CoarserGrain) false.B else a === 2.U }  // 未用到
   def napot = { if (CoarserGrain) a(1).asBool else a === 3.U }
   def off_tor = !a(1)
   def na4_napot = a(1)
@@ -93,9 +93,9 @@ trait PMPReadWriteMethodBare extends PMPConst {
       cfgVec(i) := cfg_w_m_tmp
       when (!cfg_w_m_tmp.l) {
         cfgVec(i).w := cfg_w_m_tmp.w && cfg_w_m_tmp.r
-        if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_m_tmp.a(1), cfg_w_m_tmp.a.orR) }
+        if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_m_tmp.a(1), cfg_w_m_tmp.a.orR) } // 10 --> 11，永远无法使用NA4
         when (cfgVec(i).na4_napot) {
-          mask(index + i) := match_mask(cfgVec(i), addr(index + i))
+          mask(index + i) := match_mask(cfgVec(i), addr(index + i)) // 重新生成mask
         }
       }
     }
@@ -103,14 +103,14 @@ trait PMPReadWriteMethodBare extends PMPConst {
   }
 
   def read_addr(cfg: PMPConfig)(addr: UInt): UInt = {
-    val G = PlatformGrain - PMPOffBits
+    val G = PlatformGrain - PMPOffBits  // G=10
     require(G >= 0)
     if (G == 0) {
       addr
     } else if (G >= 2) {
-      Mux(cfg.na4_napot, set_low_bits(addr, G-1), clear_low_bits(addr, G))
+      Mux(cfg.na4_napot, set_low_bits(addr, G-1), clear_low_bits(addr, G))  // 低9位全置1，低10位全置0
     } else { // G is 1
-      Mux(cfg.off_tor, clear_low_bits(addr, G), addr)
+      Mux(cfg.off_tor, clear_low_bits(addr, G), addr) // 相当于第一个NATOP
     }
   }
 
@@ -175,7 +175,7 @@ trait PMPReadWriteMethod extends PMPReadWriteMethodBare  { this: PMPBase =>
 @chiselName
 class PMPBase(implicit p: Parameters) extends PMPBundle with PMPReadWriteMethod {
   val cfg = new PMPConfig
-  val addr = UInt((PMPAddrBits - PMPOffBits).W)
+  val addr = UInt((PMPAddrBits - PMPOffBits).W) // 34.W
 
   def gen(cfg: PMPConfig, addr: UInt) = {
     require(addr.getWidth == this.addr.getWidth)
@@ -242,7 +242,7 @@ trait PMPMatchMethod extends PMPConst { this: PMPEntry =>
     }
   }
 
-  def aligned(paddr: UInt, lgSize: UInt, lgMaxSize: Int, last: PMPEntry) = {
+  def aligned(paddr: UInt, lgSize: UInt, lgMaxSize: Int, last: PMPEntry) = {  // 当前配置始终返回true
     if (lgMaxSize <= PlatformGrain) {
       true.B
     } else {
@@ -302,8 +302,8 @@ trait PMPMethod extends PMPConst {
     addrBase: Int,
     entries: Vec[PMPEntry]
   ) = {
-    val pmpCfgPerCSR = PMXLEN / new PMPConfig().getWidth
-    def pmpCfgIndex(i: Int) = (PMXLEN / 32) * (i / pmpCfgPerCSR)
+    val pmpCfgPerCSR = PMXLEN / new PMPConfig().getWidth  // 8 = 64 / 8
+    def pmpCfgIndex(i: Int) = (PMXLEN / 32) * (i / pmpCfgPerCSR)  // 只会返回0或2
     val init_value = init()
     /** to fit MaskedRegMap's write, declare cfgs as Merged CSRs and split them into each pmp */
     val cfgMerged = RegInit(init_value._1) //(Vec(num / pmpCfgPerCSR, UInt(PMXLEN.W))) // RegInit(VecInit(Seq.fill(num / pmpCfgPerCSR)(0.U(PMXLEN.W))))
@@ -315,7 +315,7 @@ trait PMPMethod extends PMPConst {
       entries(i).gen(cfgs(i), addr(i), mask(i))
     }
 
-    val cfg_mapping = (0 until num by pmpCfgPerCSR).map(i => {Map(
+    val cfg_mapping = (0 until num by pmpCfgPerCSR).map(i => {Map(  // i=0或8
       MaskedRegMap(
         addr = cfgBase + pmpCfgIndex(i),
         reg = cfgMerged(i/pmpCfgPerCSR),
@@ -339,6 +339,12 @@ trait PMPMethod extends PMPConst {
   }
 }
 
+/**
+  * 生成PMP相关的配置CSR和地址CSR
+  * PMP限制：
+  *   PlatformGrain = 12 表示最小粒度为4KB
+  *   此时不支持NA4模式，NAPOT的地址寄存器低10位必为1
+  */
 @chiselName
 class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with PMPMethod with PMAMethod with HasCSRConst {
   val io = IO(new Bundle {
@@ -352,7 +358,7 @@ class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with P
   val pmp = Wire(Vec(NumPMP, new PMPEntry()))
   val pma = Wire(Vec(NumPMA, new PMPEntry()))
 
-  val pmpMapping = pmp_gen_mapping(pmp_init, NumPMP, PmpcfgBase, PmpaddrBase, pmp)
+  val pmpMapping = pmp_gen_mapping(pmp_init, NumPMP, PmpcfgBase, PmpaddrBase, pmp)  // pmp cfg初始值为0
   val pmaMapping = pmp_gen_mapping(pma_init, NumPMA, PmacfgBase, PmaaddrBase, pma)
   val mapping = pmpMapping ++ pmaMapping
 
@@ -406,6 +412,18 @@ trait PMPCheckMethod extends PMPConst {
     resp
   }
 
+  /**
+    * 匹配当前地址相关PMP配置项，给出权限检查信息
+    *
+    * @param leaveHitMux  拉高则当valid高的下一拍返回数据
+    * @param valid        与leaveHitMux配合
+    * @param addr         要检查的地址
+    * @param size         在当前的配置中，好像没什么卵用
+    * @param pmpEntries   PMP相关寄存器
+    * @param mode         当前系统模式，如果是M模式直接通过检查
+    * @param lgMaxSize    没用
+    * @return       返回当前地址的r,w,x权限检查信息，为高表示通过
+    */
   def pmp_match_res(leaveHitMux: Boolean = false, valid: Bool = true.B)(
     addr: UInt,
     size: UInt,
@@ -416,7 +434,7 @@ trait PMPCheckMethod extends PMPConst {
     val num = pmpEntries.size
     require(num == NumPMP)
 
-    val passThrough = if (pmpEntries.isEmpty) true.B else (mode > 1.U)
+    val passThrough = if (pmpEntries.isEmpty) true.B else (mode > 1.U)  // mode大于1代表为M模式
     val pmpDefault = WireInit(0.U.asTypeOf(new PMPEntry()))
     pmpDefault.cfg.r := passThrough
     pmpDefault.cfg.w := passThrough
@@ -440,7 +458,7 @@ trait PMPCheckMethod extends PMPConst {
       cfg_vec(i) := cur
     }
 
-    // default value
+    // default value, num = 16
     match_vec(num) := true.B
     cfg_vec(num) := pmpDefault
 

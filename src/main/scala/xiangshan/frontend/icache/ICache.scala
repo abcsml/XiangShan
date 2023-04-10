@@ -32,7 +32,7 @@ import xiangshan.cache.mmu.{BlockTlbRequestIO, TlbReq}
 
 case class ICacheParameters(
     nSets: Int = 256,
-    nWays: Int = 4,
+    nWays: Int = 4,   // 8?
     rowBits: Int = 64,
     nTLBEntries: Int = 32,
     tagECC: Option[String] = None,
@@ -47,8 +47,8 @@ case class ICacheParameters(
     blockBytes: Int = 64
 )extends L1CacheParameters {
 
-  val setBytes = nSets * blockBytes
-  val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
+  val setBytes = nSets * blockBytes   // 16384
+  val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None  // 4
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
     PreferCacheField()
@@ -171,6 +171,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 
   val write_meta_bits = Wire(UInt(metaEntryBits.W))
 
+  // 2x   128*4
   val tagArrays = (0 until 2) map { bank =>
     val tagArray = Module(new SRAMTemplate(
       UInt(metaEntryBits.W),
@@ -335,11 +336,11 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val bank_0_idx_vec = (0 until partWayNum).map(i => Mux(io.read.bits(i).readValid && io.read.bits(i).port_0_read_0, io.read.bits(i).vSetIdx(0), io.read.bits(i).vSetIdx(1)))
   val bank_1_idx_vec = (0 until partWayNum).map(i => Mux(io.read.bits(i).readValid && io.read.bits(i).port_0_read_1, io.read.bits(i).vSetIdx(0), io.read.bits(i).vSetIdx(1)))
 
-
+  // 2x   2*128*2*64Bytes
   val dataArrays = (0 until partWayNum).map{ i =>
     val dataArray = Module(new ICachePartWayArray(
-      UInt(blockBits.W),
-      pWay,
+      UInt(blockBits.W),    // 64Bytes
+      pWay,   // 2
     ))
 
     dataArray.io.read.req(0).valid :=  io.read.bits(i).read_bank_0 && io.read.bits(i).readValid
@@ -739,6 +740,7 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int)(implicit p: Parameters) e
 
   io.read.req.map(_.ready := !io.write.valid)
 
+  // 2x   128*2*64Bytes
   val srams = (0 until PortNumber) map { bank =>
     val sramBank = Module(new SRAMTemplate(
       gen,

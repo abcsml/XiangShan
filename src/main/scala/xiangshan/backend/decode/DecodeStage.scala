@@ -39,6 +39,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
   })
 
+  // 同时译码6条
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
 
   for (i <- 0 until DecodeWidth) {

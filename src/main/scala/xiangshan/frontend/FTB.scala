@@ -32,7 +32,7 @@ import os.copy
 trait FTBParams extends HasXSParameter with HasBPUConst {
   val numEntries = FtbSize
   val numWays    = FtbWays
-  val numSets    = numEntries/numWays // 512
+  val numSets    = numEntries/numWays // 512 = 2048/4
   val tagSize    = 20
 
   
@@ -130,9 +130,9 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   
   val valid       = Bool()
 
-  val brSlots = Vec(numBrSlot, new FtbSlot(BR_OFFSET_LEN))
+  val brSlots = Vec(numBrSlot, new FtbSlot(BR_OFFSET_LEN))  // 第一条条件分支
 
-  val tailSlot = new FtbSlot(JMP_OFFSET_LEN, Some(BR_OFFSET_LEN))
+  val tailSlot = new FtbSlot(JMP_OFFSET_LEN, Some(BR_OFFSET_LEN)) // 第二条条件分支
 
   // Partial Fall-Through Address
   val pftAddr     = UInt(log2Up(PredictWidth).W)
@@ -273,12 +273,24 @@ object FTBMeta {
 //   }
 // }
 
+/**
+  * 功能：为s2，s3提供full_pred（如果没有命中，直接用s1的预测）；更新ftb_entry
+  * 输入：s0_pc，s1_full_pred
+  * 输出：s2 s3 full_pred（s3的full_pred只是s2延迟一周期）
+  * 
+  * ? last_stage_ftb_entry信号来源去向未知
+  */
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
   with HasCircularQueuePtrHelper with HasPerfEvents {
   override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
 
   val ftbAddr = new TableAddr(log2Up(numSets), 1)
 
+  /**
+    * 功能：根据pc返回FTBEntry，更新
+    * 在下一拍返回
+    * 512sets，4ways
+    */
   class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
       val s1_fire = Input(Bool())
@@ -339,6 +351,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       XSPerfAccumulate(f"ftb_update_${n}_way_hit", PopCount(u_total_hits) === n.U)
     }
 
+    // plru算法更新
     val replacer = ReplacementPolicy.fromString(Some("setplru"), numWays, numSets)
     // val allocWriteWay = replacer.way(req_idx)
 

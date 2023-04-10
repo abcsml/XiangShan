@@ -189,18 +189,18 @@ trait PMAMethod extends PMAConst {
       mask_list.append(genMask(addr, a))
     }
 
-    addPMA(0x480000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true)
-    addPMA(0x80000000L, a = 1, w = true, r = true)
+    addPMA(0x480000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true)  // 内存，16GB？
+    addPMA(0x80000000L, a = 1, w = true, r = true)  // PLIC, PCIE
     addPMA(0x3c000000L, a = 1)
-    addPMA(0x39002000L, a = 1, w = true, r = true)
+    addPMA(0x39002000L, a = 1, w = true, r = true)  // CacheCtrl, Core Reset
     addPMA(0x39000000L, a = 1)
-    addPMA(0x38021000L, a = 1, w = true, r = true, x = true)
+    addPMA(0x38021000L, a = 1, w = true, r = true, x = true)  // DEBUG
     addPMA(0x38020000L, a = 1)
-    addPMA(0x38010000L, a = 1, w = true, r = true)
+    addPMA(0x38010000L, a = 1, w = true, r = true)  // CLINT
     addPMA(0x38000000L, a = 1)
-    addPMA(0x31310000L, a = 1, w = true, r = true)
+    addPMA(0x31310000L, a = 1, w = true, r = true)  // 外设
     addPMA(0x30000000L, a = 1)
-    addPMA(0x20000000L, a = 1, x = true, r = true)
+    addPMA(0x20000000L, a = 1, x = true, r = true)  // Flash
     addPMA(0x10000000L, a = 1)
     addPMA(0)
     while (cfg_list.length < 16) {
@@ -251,6 +251,18 @@ trait PMACheckMethod extends PMPConst {
     resp
   }
 
+  /**
+    * 匹配当前地址相关PMA配置项，给出权限检查信息
+    *
+    * @param leaveHitMux  拉高则当valid高的下一拍返回数据
+    * @param valid        与leaveHitMux配合
+    * @param addr         要检查的地址
+    * @param size         没用
+    * @param pmaEntries   PMA相关寄存器
+    * @param mode         没用
+    * @param lgMaxSize    没用
+    * @return       返回当前地址的r,w,x权限检查信息，还有atomic,c信息，atomic不清楚，c表示当前地址为内存地址
+    */
   def pma_match_res(leaveHitMux: Boolean = false, valid: Bool = true.B)(
     addr: UInt,
     size: UInt,

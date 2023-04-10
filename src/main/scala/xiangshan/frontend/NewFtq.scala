@@ -42,6 +42,7 @@ object FtqPtr {
   }
 }
 
+// N路同时读，N路同时写（写同样数据）
 class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends XSModule {
 
   val io = IO(new Bundle() {
@@ -155,8 +156,8 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSB
 
 
 class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
-  val redirect = Valid(new BranchPredictionRedirect)
-  val update = Valid(new BranchPredictionUpdate)
+  val redirect = Valid(new BranchPredictionRedirect)    // 预测错误时 redirect
+  val update = Valid(new BranchPredictionUpdate)        // commit 时 update
   val enq_ptr = Output(new FtqPtr)
 }
 
@@ -507,6 +508,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val bpu_in_resp_ptr = Mux(bpu_in_stage === BP_S1, bpuPtr, bpu_in_resp.ftq_idx)
   val bpu_in_resp_idx = bpu_in_resp_ptr.value
 
+  // 存储与指令地址相关信息，寄存器堆实现
   // read ports:      prefetchReq ++  ifuReq1 + ifuReq2 + ifuReq3 + commitUpdate2 + commitUpdate
   val ftq_pc_mem = Module(new FtqPcMemWrapper(1))
   // resp from uBTB
@@ -514,6 +516,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.waddr := bpu_in_resp_idx
   ftq_pc_mem.io.wdata.fromBranchPrediction(bpu_in_resp)
 
+  // 一些重定向需要恢复的信息，主要包括RAS和分支历史相关的信息
   //                                                            ifuRedirect + backendRedirect + commit
   val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+1+1))
   // these info is intended to enq at the last stage of bpu
@@ -523,11 +526,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   println(f"ftq redirect SRAM: entry ${ftq_redirect_sram.io.wdata.getWidth} * ${FtqSize} * 3")
   println(f"ftq redirect SRAM: ahead fh ${ftq_redirect_sram.io.wdata.afhob.getWidth} * ${FtqSize} * 3")
 
+  // 其余BPU信息
   val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
   // these info is intended to enq at the last stage of bpu
   ftq_meta_1r_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(dupForFtq)
   ftq_meta_1r_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.last_stage_meta
+  // FTB项信息，寄存器堆实现
   //                                                            ifuRedirect + backendRedirect + commit
   val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, 1+1+1, 1, "FtqEntry"))
   ftb_entry_mem.io.wen(0) := io.fromBpu.resp.bits.lastStage.valid(dupForFtq)
@@ -535,6 +540,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
 
 
+  // 其他重要信息
   // multi-write
   val update_target = Reg(Vec(FtqSize, UInt(VAddrBits.W))) // could be taken target or fallThrough //TODO: remove this
   val newest_entry_target = Reg(UInt(VAddrBits.W))
@@ -772,6 +778,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val pds = pdWb.bits.pd
   val ifu_wb_valid = pdWb.valid
   val ifu_wb_idx = pdWb.bits.ftqIdx.value
+  // 存储IFU返回的预测块内译码信息
   // read ports:                                                         commit update
   val ftq_pd_mem = Module(new SyncDataModuleTemplate(new Ftq_pd_Entry, FtqSize, 1, 1, "FtqPd"))
   ftq_pd_mem.io.wen(0) := ifu_wb_valid
@@ -1082,7 +1089,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSError(do_commit && diff_commit_target =/= commit_target, "\ncommit target should be the same as update target\n")
 
   io.toBpu.update := DontCare
-  io.toBpu.update.valid := commit_valid && do_commit
+  io.toBpu.update.valid := commit_valid && do_commit  // update条件：
   val update = io.toBpu.update.bits
   update.false_hit   := commit_hit === h_false_hit
   update.pc          := commit_pc_bundle.startAddr

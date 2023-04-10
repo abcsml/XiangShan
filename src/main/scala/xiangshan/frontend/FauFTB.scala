@@ -71,6 +71,10 @@ class FauFTBWay(implicit p: Parameters) extends XSModule with FauFTBParams {
 }
 
 
+/**
+  * 输入：s0_pc, update信息
+  * 输出：s1 full_pred（除了is_jal信息）
+  */
 class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   
   class FauFTBMeta(implicit p: Parameters) extends XSBundle with FauFTBParams {

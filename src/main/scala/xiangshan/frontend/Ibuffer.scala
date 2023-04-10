@@ -31,7 +31,7 @@ class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](
 class IBufferIO(implicit p: Parameters) extends XSBundle {
   val flush = Input(Bool())
   val in = Flipped(DecoupledIO(new FetchToIBuffer))
-  val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
+  val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))   // 可以同时取出6条去译码
   val full = Output(Bool())
 }
 
@@ -89,9 +89,9 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
 class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
 
-  val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, 2 * DecodeWidth, PredictWidth, "IBuffer"))
+  val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, 2 * DecodeWidth, PredictWidth, "IBuffer")) // 可同时做12读，16写
 
-  val deqPtrVec = RegInit(VecInit.tabulate(2 * DecodeWidth)(_.U.asTypeOf(new IbufPtr)))
+  val deqPtrVec = RegInit(VecInit.tabulate(2 * DecodeWidth)(_.U.asTypeOf(new IbufPtr))) // [0,1,2,3,4,...,15]
   val deqPtrVecNext = Wire(Vec(2 * DecodeWidth, new IbufPtr))
   deqPtrVec := deqPtrVecNext
   val deqPtr = deqPtrVec(0)
@@ -155,7 +155,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   }
   val deqEnable_n = io.out.map(o => !o.fire) :+ true.B
   for (i <- 0 until DecodeWidth) {
-    deqData(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(DecodeWidth + 1))
+    deqData(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(DecodeWidth + 1)) // 丢掉前i个，再取前6个
   }
   ibuf.io.raddr := VecInit(deqPtrVecNext.map(_.value))
 

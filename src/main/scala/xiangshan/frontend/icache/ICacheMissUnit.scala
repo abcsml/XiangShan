@@ -161,14 +161,14 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     }
 
     is(s_wait_mem_grant) {
-      when(edge.hasData(io.mem_grant.bits)) {
+      when(edge.hasData(io.mem_grant.bits)) { // 返回是否有数据
         when(io.mem_grant.fire()) {
           readBeatCnt := readBeatCnt + 1.U
           respDataReg(readBeatCnt) := io.mem_grant.bits.data
           req_corrupt := io.mem_grant.bits.corrupt
           grant_param := io.mem_grant.bits.param
           is_dirty    := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
-          when(readBeatCnt === (refillCycles - 1).U) {
+          when(readBeatCnt === (refillCycles - 1).U) {  // 可能是多拍数据
             assert(refill_done, "refill not done!")
             state := s_send_grant_ack
             state_dup.map(_ := s_send_grant_ack)

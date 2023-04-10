@@ -28,7 +28,7 @@ class ReplacePipeReq(implicit p: Parameters) extends ICacheBundle
   val paddr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
   val param  = UInt(TLPermissions.cWidth.W)
-  val voluntary = Bool()
+  val voluntary = Bool()  // 主动释放
   val needData = Bool()
   val waymask = UInt(nWays.W)
   val id = UInt(ReplaceIdWid.W)
@@ -77,6 +77,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   /**
     ******************************************************************************
     * ReplacePipe Stage 0
+    * 请求Data，Meta
     ******************************************************************************
     */  
   val r0_valid = generatePipeControl(lastFire = io.pipe_req.fire(), thisFire = r0_fire, thisFlush = false.B, lastFlush = false.B)
@@ -115,6 +116,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   /**
     ******************************************************************************
     * ReplacePipe Stage 1
+    * Meta，Data数据返回
     ******************************************************************************
     */  
   
@@ -153,6 +155,7 @@ class ICacheReplacePipe(implicit p: Parameters) extends ICacheModule{
   /**
     ******************************************************************************
     * ReplacePipe Stage 2
+    * 发送请求给Release
     ******************************************************************************
     */
     

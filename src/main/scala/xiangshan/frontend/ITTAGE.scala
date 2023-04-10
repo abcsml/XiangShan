@@ -141,6 +141,11 @@ class FakeITTageTable()(implicit p: Parameters) extends ITTageModule {
   io.resp := DontCare
 
 }
+
+/**
+  * 功能：根据pc和历史返回ITTageResp信息；根据ITTageUpdate更新
+  * 延迟一周期返回
+  */
 @chiselName
 class ITTageTable
 (
@@ -351,6 +356,15 @@ class FakeITTage(implicit p: Parameters) extends BaseITTage {
   io.s2_ready := true.B
 }
 // TODO: check target related logics
+/**
+  * 功能：更新s3 jalr_target信息
+  * 输入：s0_pc；折叠历史；来自FTB的s2 full_pred（用作base pred）
+  * 输出：提供s3 full_pred给RAS
+  * 过场：s1 full_pred
+  *
+  * ？：FTB有提供s1吗
+  * ？：last_stage_ftb_entry干啥的
+  */
 @chiselName
 class ITTage(implicit p: Parameters) extends BaseITTage {
   override val meta_size = 0.U.asTypeOf(new ITTageMeta).getWidth

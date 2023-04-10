@@ -35,8 +35,8 @@ class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle
 
 class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle
 {
-  val vaddr    = UInt(VAddrBits.W)
-  val registerData = UInt(blockBits.W)
+  val vaddr    = UInt(VAddrBits.W)      // 39.W
+  val registerData = UInt(blockBits.W)  // 512 = 64*8
   val sramData = UInt(blockBits.W)
   val select   = Bool()
   val paddr    = UInt(PAddrBits.W)
@@ -147,7 +147,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** s0 control */
   val s0_valid       = fromFtq.valid
-  val s0_req_vaddr   = (0 until partWayNum + 1).map(i => VecInit(Seq(fromFtqReq(i).startAddr, fromFtqReq(i).nextlineStart)))
+  // 每个复制三份
+  val s0_req_vaddr   = (0 until partWayNum + 1).map(i => VecInit(Seq(fromFtqReq(i).startAddr, fromFtqReq(i).nextlineStart)))  //i <- 0，1，2
   val s0_req_vsetIdx = (0 until partWayNum + 1).map(i => VecInit(s0_req_vaddr(i).map(get_idx(_))))
   val s0_only_first  = (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i) && !fromFtqReq(i).crossCacheline)
   val s0_double_line = (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i) &&  fromFtqReq(i).crossCacheline)
@@ -219,7 +220,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toITLB(1).bits.size     := 3.U // TODO: fix the size
   toITLB(1).bits.vaddr    := ftq_req_to_itlb_vaddr(1)
   toITLB(1).bits.debug.pc := ftq_req_to_itlb_vaddr(1)
-
+  /**
+    * 后两个给miss用，用来等待L2TLB的结果
+    * 如果用上面两个，就需要一个周期拉低来判断结果，导致需要地址翻译至少需要两个周期
+    */
   toITLB(2).valid         := tlb_slot.valid
   toITLB(2).bits.size     := 3.U // TODO: fix the size
   toITLB(2).bits.vaddr    := tlb_slot.req_vaddr(0)
@@ -349,10 +353,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_data_cacheline          = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
   val s1_data_errorBits          = ResultHoldBypass(data = dataResp.codes, valid = RegNext(s0_fire))
 
+  // 做Tag比对
   val s1_tag_eq_vec        = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w =>  s1_meta_ptags(p)(w) ===  s1_req_ptags(p) ))))
   val s1_tag_match_vec     = VecInit((0 until PortNumber).map( k => VecInit(s1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_cohs(k)(w).isValid()})))
   val s1_tag_match         = VecInit(s1_tag_match_vec.map(vector => ParallelOR(vector)))
 
+  // 命中信息
   val s1_port_hit          = VecInit(Seq(s1_tag_match(0) && s1_valid  && !tlbExcpPF(0) && !tlbExcpAF(0),  s1_tag_match(1) && s1_valid && s1_double_line && !tlbExcpPF(1) && !tlbExcpAF(1) ))
   val s1_bank_miss         = VecInit(Seq(!s1_tag_match(0) && s1_valid && !tlbExcpPF(0) && !tlbExcpAF(0), !s1_tag_match(1) && s1_valid && s1_double_line && !tlbExcpPF(1) && !tlbExcpAF(1) ))
   val s1_hit               = (s1_port_hit(0) && s1_port_hit(1)) || (!s1_double_line && s1_port_hit(0))
@@ -483,7 +489,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   pmpExcpAF(1)  := fromPMP(1).instr && s2_double_line
   //exception information
   //short delay exception signal
-  val s2_except_pf        = RegEnable(tlbExcpPF, s1_fire)
+  val s2_except_pf        = RegEnable(tlbExcpPF, s1_fire)   // Page Fault
   val s2_except_tlb_af    = RegEnable(tlbExcpAF, s1_fire)
   //long delay exception signal
   val s2_except_pmp_af    =  DataHoldBypass(pmpExcpAF, RegNext(s1_fire))
@@ -494,9 +500,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //MMIO
   val s2_mmio      = DataHoldBypass(io.pmp(0).resp.mmio && !s2_except_tlb_af(0) && !s2_except_pmp_af(0) && !s2_except_pf(0), RegNext(s1_fire)).asBool() && s2_valid
  
-  //send physical address to PMP
+  //send physical address to PMP 单周期返回
   io.pmp.zipWithIndex.map { case (p, i) =>
-    p.req.valid := s2_valid && !missSwitchBit
+    p.req.valid := s2_valid && !missSwitchBit   // missSwitchBit?
     p.req.bits.addr := s2_req_paddr(i)
     p.req.bits.size := 3.U // TODO
     p.req.bits.cmd := TlbCmd.exec
@@ -721,8 +727,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /*** send request to MissUnit ***/
   (0 until 4).map{j => 
       (0 until 2).map { i =>
-      if(i == 1) toMSHR(i).valid   := (hit_0_miss_1_latch || miss_0_miss_1_latch) && wait_state === wait_queue_ready && !s2_mmio
-          else     toMSHR(i).valid := (only_0_miss_latch || miss_0_hit_1_latch || miss_0_miss_1_latch || miss_0_except_1_latch) && wait_state === wait_queue_ready && !s2_mmio
+      if(i == 1) toMSHR(i).valid   := (hit_0_miss_1_latch || miss_0_miss_1_latch) && wait_state === wait_queue_ready && !s2_mmio    // miss 1
+          else     toMSHR(i).valid := (only_0_miss_latch || miss_0_hit_1_latch || miss_0_miss_1_latch || miss_0_except_1_latch) && wait_state === wait_queue_ready && !s2_mmio  // miss 0
       toMSHR(i).bits.paddr    := s2_req_paddr(i)
       toMSHR(i).bits.vaddr    := s2_req_vaddr(i)
       toMSHR(i).bits.waymask  := s2_waymask(i)
